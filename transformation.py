@@ -1,6 +1,7 @@
 import os 
 from PIL import Image, ImageEnhance, ImageFilter
 import pandas as pd
+import math
 import numpy as np
 import matplotlib.pyplot as plt
 import cv2
@@ -39,21 +40,15 @@ def apply_all_transformations(images):
         'rotation': {'min': -22.5, 'max': 22.5, 'step': 2.5},
         'lighten_darken': {'min': -0.05, 'max': 0.05, 'step': 0.01},
         'gaussian_noise': {'min': 0.0, 'max': 0.1, 'step': 0.01},
-        'translation': {'min': -50, 'max': 50, 'step': 5}  # pixels
-    }
-    
-    # 3d transformations 
-    transformations_3d = {
-        'camera_distance': {'min': 2.5, 'max': 3.0, 'step': 0.1},
-        'xy_translation_3d': {'min': -0.05, 'max': 0.05, 'step': 0.01},
-        'rotation_3d': {'min': -180, 'max': 180, 'step': 10},  # "any" means full rotation
-        'background': {'values': [(0.1, 0.1, 0.1), (0.2, 0.2, 0.2), (0.3, 0.3, 0.3), 
-                                 (0.4, 0.4, 0.4), (0.5, 0.5, 0.5), (0.6, 0.6, 0.6),
-                                 (0.7, 0.7, 0.7), (0.8, 0.8, 0.8), (0.9, 0.9, 0.9), (1.0, 1.0, 1.0)]}
+        'translation': {'min': -50, 'max': 50, 'step': 5},  # pixels
+        'contrast': {'min': 0, 'max': 1, 'step': 0.1}, 
+        'blur': {'min': 0, 'max': 5, 'step': 0.5},  
+        'shear': {'min': 0, 'max': 1, 'step': 0.1}
+      
     }
     
     # combine them all 
-    transformations = {**transformations_2d, **transformations_3d}
+    transformations = {**transformations_2d}
     
     transformed_images = []
     total_transforms = 0
@@ -94,16 +89,15 @@ def apply_all_transformations(images):
                 transformed_img = apply_brightness(img, transform_value)
             elif transform_type == 'gaussian_noise':
                 transformed_img = apply_gaussian_noise(img, transform_value)
-            if transform_type == 'translation':
+            elif transform_type == 'translation':
                 transformed_img = apply_translation(img, tx, ty)
-            elif transform_type == 'camera_distance':
-                transformed_img = apply_camera_distance(img, transform_value)
-            elif transform_type == 'xy_translation_3d':
-                transformed_img = apply_xy_translation_3d(img, tx, ty)
-            elif transform_type == 'rotation_3d':
-                transformed_img = apply_rotation_3d(img, transform_value)
-            elif transform_type == 'background':
-                transformed_img = apply_background_change(img, bg_color)
+            elif transform_type == 'contrast':
+                transformed_img = apply_contrast(img, transform_value)
+            elif transform_type == 'shear':
+                transformed_img = apply_shear(img, transform_value)
+            elif transform_type == 'blur':
+                transformed_img = apply_blur(img, transform_value)
+            
             
             # Save the transformed image
             save_path = os.path.join(output_dir, new_filename)
@@ -149,8 +143,61 @@ def apply_rotation(img: Image.Image, angle: float) -> Image.Image:
     return rotated
 
 def apply_contrast(img: Image.Image, contrast_amount: float) -> Image.Image:
-   adjusted_image = cv2.convertScaleAbs(img, alpha=contrast_amount, beta=0)
-   return adjusted_image
+    img_np = np.array(img)
+    if img_np.shape[2] == 4: # Check if it's RGBA
+        img_np = cv2.cvtColor(img_np, cv2.COLOR_RGBA2RGB)
+    adjusted_image = cv2.convertScaleAbs(img_np, alpha=contrast_amount, beta=0)
+    #convert back to PIL Image
+    adjusted_image_pil = Image.fromarray(adjusted_image)
+    return adjusted_image_pil
+
+def apply_shear(img: Image.Image, shear_factor: float) -> Image.Image:
+    width, height = img.size
+    #new width and height after shear
+    shift_in_pixels = int(math.ceil(shear_factor * height))
+    new_width = width + shift_in_pixels
+    shear_image = img.transform(
+        (new_width, height),  #new image size 
+        Image.AFFINE,         # affine transformation since shear is a linear transformation
+        (1, shear_factor, -shift_in_pixels if shear_factor > 0 else 0,  #this is the transformation matrix
+         0, 1, 0),
+        resample=Image.BICUBIC,
+        fillcolor=(255, 255, 255)  # or any background color you prefer
+    )
+
+    return shear_image
+
+def apply_blur(img: Image.Image, blur_radius: float) -> Image.Image:
+    img_np = np.array(img)
+
+    #convert to bgr array if needed (apparently most PIL images are RGB)
+    if img_np.ndim == 3 and img_np.shape[2] == 3: # RGB
+        img_np_bgr = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
+    elif img_np.ndim == 3 and img_np.shape[2] == 4: # RGBA 
+        img_np_bgr = cv2.cvtColor(img_np, cv2.COLOR_RGBA2BGR)
+    else: 
+        img_np_bgr = img_np.copy()
+
+    ksize = int(blur_radius * 6)
+    if ksize % 2 == 0:
+        ksize += 1
+    # minimum kernal size 
+    if ksize < 3 and blur_radius > 0:
+        ksize = 3
+    elif blur_radius == 0: #no blur 
+        return img 
+    
+    # apply gaussian blur
+    blurred_image_np_bgr = cv2.GaussianBlur(img_np_bgr, (ksize, ksize), blur_radius)
+
+    if img_np.ndim == 3 and (img_np.shape[2] == 3 or img_np.shape[2] == 4):
+        blurred_image_np_rgb = cv2.cvtColor(blurred_image_np_bgr, cv2.COLOR_BGR2RGB)
+    else: 
+        blurred_image_np_rgb = blurred_image_np_bgr
+    blurred_image_pil = Image.fromarray(blurred_image_np_rgb)
+
+    return blurred_image_pil
+    
 
 #brighten or darken the image 
 def apply_brightness(img: Image.Image, brightness_factor: float) -> Image.Image:
@@ -250,6 +297,7 @@ def apply_background_change_simple(img: Image.Image, bg_color: Tuple[float, floa
 
 if __name__ == "__main__":
     images = load_data(data_path)
+    images = images[:4]  # limit to first 4 images to test
     print(f"Loaded {len(images)} images.")
     print(f"Will create {len(images) * 5} transformed images (5 transformations per original image)")
     transformed_images = apply_all_transformations(images)
