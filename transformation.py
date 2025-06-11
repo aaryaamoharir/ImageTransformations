@@ -10,9 +10,65 @@ from typing import List, Tuple, Union
 from scipy import ndimage
 from scipy.ndimage import binary_dilation
 
-data_path = "/Users/aaryaamoharir/Desktop/Summer 2025 /Research /corruptionML/imagenette2"
-output_dir = "/Users/aaryaamoharir/Desktop/Summer 2025 /Research /corruptionML/imagenette2/transformed"
+data_path = "/Users/aaryaamoharir/Desktop/Summer 2025 /Research /corruptionML/CIFAR-10-C"
+output_dir = "/Users/aaryaamoharir/Desktop/Summer 2025 /Research /corruptionML/CIFAR-10-C/transformed"
+store_dir = "/Users/aaryaamoharir/Desktop/Summer 2025 /Research /corruptionML/CIFAR-10-C/store"
 os.makedirs(output_dir, exist_ok=True)
+os.makedirs(store_dir, exist_ok=True)
+
+def load_data_npy(data_path):
+    print("hi")
+    npy_files = []
+    for root, _, files in os.walk(data_path):
+        for file in files:
+            if file.lower().endswith('.npy'):
+                npy_files.append(os.path.join(root, file))
+    for i, file in enumerate(npy_files):
+        print(f"{i+1}: {file}")
+    
+    severity_indices = [0,1001,2002,3003,4004, 10000, 10001, 12002, 13003, 14004, 15005, 20000,22002, 23003, 24004, 25005, 30000, 40000] 
+    severity_labels = [1, 2, 3, 4, 5] # For naming
+
+    extracted_count = 0
+    for file_path in npy_files:
+        try:
+            corruption_data = np.load(file_path) # Expected shape (50000, 32, 32, 3)
+            corruption_name = os.path.splitext(os.path.basename(file_path))[0]
+            
+            print(f"\n--- Processing corruption type: '{corruption_name}' ---")
+            
+            # Verify the expected shape
+            if corruption_data.shape != (50000, 32, 32, 3):
+                print(f"  Warning: Unexpected shape for {corruption_name}.npy: {corruption_data.shape}. Skipping.")
+                continue
+
+            for s_idx, severity_level in zip(severity_indices, severity_labels):
+                img_array = corruption_data[s_idx] # Get the image at the specific severity index
+
+                # Standard CIFAR-10-C images are already (H, W, C) and uint8
+                # So, no complex transposing or dtype conversion should be needed for standard data
+                # Adding a small sanity check just in case, but generally won't trigger for CIFAR-10-C
+                if img_array.ndim == 2: # grayscale
+                    img_array = np.stack([img_array]*3, axis=-1)
+                elif img_array.shape[0] in [1, 3] and img_array.ndim == 3 and img_array.shape[1] == 32: # potential C,H,W
+                    img_array = np.transpose(img_array, (1, 2, 0)) # Transpose to H,W,C
+
+                if img_array.dtype != np.uint8:
+                     img_array = img_array.astype(np.uint8)
+
+                pil_img = Image.fromarray(img_array)
+# Construct filename: corruption_type_severityX_indexY_labelZ.png
+                image_filename = os.path.join(store_dir, 
+                                              f"{corruption_name}_severity{severity_level}_idx{s_idx}.png")
+                pil_img.save(image_filename)
+                print(f"  Saved: {os.path.basename(image_filename)}")
+                extracted_count += 1
+
+        except Exception as e:
+            print(f"Failed to process file {file_path}: {e}")
+
+    print(f"\nSuccessfully extracted {extracted_count} images into '{output_dir}'.")
+    return extracted_count
 
 def load_data(data_path):
     image_paths = []
@@ -31,6 +87,7 @@ def load_data(data_path):
     print(f"Loaded {len(images)} images.")
     
     return images
+
 
 def apply_all_transformations(images):
     
@@ -56,6 +113,7 @@ def apply_all_transformations(images):
     for i, (img, path) in enumerate(images):
         base = os.path.basename(path)
         name, ext = os.path.splitext(base)
+        ext = '.jpg'
         
         # apply each transformation to each image (amount of transformation is random)
         for transform_type in transformations.keys():
@@ -296,9 +354,9 @@ def apply_background_change_simple(img: Image.Image, bg_color: Tuple[float, floa
     return Image.blend(img.convert('RGB'), background, 0.3)
 
 if __name__ == "__main__":
-    images = load_data(data_path)
-    images = images[:4]  # limit to first 4 images to test
-    print(f"Loaded {len(images)} images.")
-    print(f"Will create {len(images) * 5} transformed images (5 transformations per original image)")
-    transformed_images = apply_all_transformations(images)
-    print(f"Successfully transformed and saved {len(transformed_images)} images.")
+    images = load_data_npy(data_path)
+    #images = images[:4]  # limit to first 4 images to test
+    #print(f"Loaded {len(images)} images.")
+    #print(f"Will create {len(images) * 5} transformed images (5 transformations per original image)")
+    #transformed_images = apply_all_transformations(images)
+    #print(f"Successfully transformed and saved {len(transformed_images)} images.")
