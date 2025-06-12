@@ -113,7 +113,7 @@ def test(epoch, net):
 
 train_losses=[]
 test_losses=[]
-epochs=40
+epochs=3
 
 for epoch in range(0,epochs):
     train_losses.append(train(epoch, net))
@@ -121,7 +121,7 @@ for epoch in range(0,epochs):
     scheduler.step()
 print('Accuracy of the network on the test images: %d %%' % (acc))
 
-epochs=40
+epochs=3
 plt.plot(np.arange(1,epochs+1),train_losses, label='train losses')
 plt.plot(np.arange(1,epochs+1), test_losses, label='test losses')
 plt.xlabel('epochs')
@@ -132,7 +132,7 @@ plt.show()
 imgloader = torch.utils.data.DataLoader(
     testset, batch_size=100, shuffle=False, num_workers=2)
 dataiter = iter(imgloader)
-org_images, org_labels = dataiter.next()
+org_images, org_labels = next(dataiter)
 
 org_labels = org_labels.to(device)
 org_images = org_images.to(device)
@@ -219,7 +219,7 @@ for i in selected:
         plt.axis('off')
         plt.show()
 print('==> Building new model..')
-net_adv = ResNet18()
+net_adv = resnet18(weights=None)
 net_adv = net_adv.to(device)
 if device == 'cuda':
     net_adv = torch.nn.DataParallel(net_adv)
