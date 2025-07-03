@@ -65,7 +65,7 @@ def create_loader(
 def main():
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-    # 1. Load and Save Pretrained Model (as the mean for SWAG initialization)
+    #loads and saves the pretrained model 
     model = torch.hub.load(
         'chenyaofo/pytorch-cifar-models',
         'cifar10_resnet56',
@@ -82,7 +82,6 @@ def main():
     print(f"Model weights saved to {model_weights_path}")
 
     # 2. Prepare CIFAR-10 Training Dataset Loader for SWAG sampling
-    # This is for the data that SWAG will iterate over to collect statistics.
     train_transform = T.Compose([ # This transform is currently not used due to preprocess_tf_to_torch
         T.ToTensor(),
         T.Normalize((0.4914, 0.4822, 0.4465), (0.2471, 0.2435, 0.2616)),
@@ -138,34 +137,30 @@ def main():
     optimizer = torch.optim.SGD(swag_model.model.parameters(), lr=0.0001, momentum=0.9, weight_decay=5e-4)
     criterion = torch.nn.CrossEntropyLoss()
 
-    print("Collecting SWAG statistics (mean and covariance of weights)...")
-    swag_model.train() # SWAG statistics collection happens in train mode (affects BatchNorm)
+    print("Collecting SWAG statistics")
+    #swag collection statsitics happen in train mode ig 
+    swag_model.train()
     num_swag_updates = 0
     min_updates_for_low_rank_cov = swag_model._max_rank + 1
 
-    # Define how many epochs to run for SWAG statistics collection
-    SWAG_COLLECTION_EPOCHS = 20 # Start with 20-50, adjust based on convergence and resources
+    SWAG_COLLECTION_EPOCHS = 50 
 
     for epoch in range(SWAG_COLLECTION_EPOCHS):
+        #print staetment for debugging 
         print(f"--- SWAG Collection Epoch {epoch + 1}/{SWAG_COLLECTION_EPOCHS} ---")
         for batch_idx, (images, labels) in enumerate(tqdm(train_loader, desc=f"SWAG Epoch {epoch+1}")):
             images = images.to(device)
             labels = labels.to(device)
             images = images.to(torch.float32)
 
-            #with torch.no_grad():
-            #    _ = swag_model.model(images) # Call the underlying model's forward
 
             optimizer.zero_grad() # Zero gradients before each batch
 
-            # Perform a forward pass and calculate loss
+            #forward pass to get loss, backward pass, and then optimizer 
             outputs = swag_model.model(images) # Call the underlying model to get predictions
             loss = criterion(outputs, labels)
 
-            # Backward pass: compute gradients
             loss.backward()
-
-            # Optimizer step: update model weights
             optimizer.step()
 
             swag_model.update_stats()
@@ -178,8 +173,6 @@ def main():
     swag_model.eval() # Set model back to eval mode after stats collection
     print(f"SWAG statistics collected from {num_swag_updates} updates.")
 
-    # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
-    # Now, after collecting statistics, perform SWAG's Monte Carlo Sampling
 
     print("Collecting SWAG samples for uncertainty approximation (this can take a while)...")
     swag_model.get_mc_samples(
@@ -189,7 +182,6 @@ def main():
     )
     print("SWAG samples collected.")
 
-    # 5. Evaluate with SWAG for Uncertainty
     swag_model.eval() # Set to evaluation mode
     all_preds, all_labels = [], []
     all_uncertainties = {

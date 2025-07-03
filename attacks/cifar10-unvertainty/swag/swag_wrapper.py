@@ -135,7 +135,7 @@ class SWAGWrapper(DistributionalWrapper):
         for i in range(num_mc_samples):
             time_start = time.perf_counter()
             self._sample_and_store_params(
-                train_loader=train_loader, fraction=0.1, channels_last=channels_last
+                train_loader=train_loader, fraction=1.0, channels_last=channels_last
             )
             time_end = time.perf_counter()
             logger.info(

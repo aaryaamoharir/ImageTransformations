@@ -84,7 +84,7 @@ def main():
     # 2. Prepare CIFAR-10 Training Dataset Loader for SWAG sampling
     train_transform = T.Compose([ # This transform is currently not used due to preprocess_tf_to_torch
         T.ToTensor(),
-        T.Normalize((0.4914, 0.4822, 0.4465), (0.2471, 0.2435, 0.2616)),
+        T.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
     ])
     cifar10_train_dataset = tfds.as_numpy(tfds.load('cifar10', split='train', as_supervised=True, shuffle_files=False))
 
@@ -140,7 +140,7 @@ def main():
     num_swag_updates = 0
     min_updates_for_low_rank_cov = swag_model._max_rank + 1
 
-    SWAG_COLLECTION_EPOCHS = 10 
+    SWAG_COLLECTION_EPOCHS = 50 
 
     for epoch in range(SWAG_COLLECTION_EPOCHS):
         #print staetment for debugging 
