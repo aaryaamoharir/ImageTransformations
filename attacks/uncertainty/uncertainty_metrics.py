@@ -6,7 +6,7 @@ import numpy as np
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 from tqdm import tqdm
 
-# Constants for CIFAR-10 normalization
+# constants 
 CIFAR10_MEAN = (0.4914, 0.4822, 0.4465)
 CIFAR10_STD = (0.2023, 0.1994, 0.2010)
 
@@ -67,32 +67,25 @@ def calculate_energy(logits, temperature=1.0):
     return -temperature * torch.logsumexp(logits / temperature, dim=-1).cpu().item()
 
 def calculate_odin(model, image, temperature=1000.0, epsilon=0.0014):
-    """Calculate ODIN uncertainty score"""
     model.eval()
     
-    # Create a fresh tensor that can have requires_grad
+    # fresh tensor 
     odin_image = image.detach().clone()
     odin_image.requires_grad = True
-    
-    # Temperature scaling
+
     outputs = model(odin_image)
     outputs = outputs / temperature
     
-    # Get max class and calculate gradient
     max_class = outputs.argmax(dim=1)
     loss = torch.nn.functional.cross_entropy(outputs, max_class)
-    
-    # Clear gradients first
     if odin_image.grad is not None:
         odin_image.grad.zero_()
     
     loss.backward()
     
-    # Input preprocessing (gradient-based perturbation)
+    # input preprocessing 
     gradient = torch.sign(odin_image.grad.data)
     perturbed_image = odin_image.detach() - epsilon * gradient
-    
-    # Forward pass with perturbed input
     with torch.no_grad():
         perturbed_outputs = model(perturbed_image)
         perturbed_outputs = perturbed_outputs / temperature
@@ -101,34 +94,26 @@ def calculate_odin(model, image, temperature=1000.0, epsilon=0.0014):
     return odin_score
 
 def calculate_doctor_alpha(logits, alpha=1.0):
-    """Calculate DOCTOR Alpha uncertainty"""
     softmax_probs = torch.softmax(logits, dim=-1)
-    # Alpha-based uncertainty (entropy-like measure)
     if alpha == 1.0:
-        # Standard entropy when alpha = 1
         uncertainty = -torch.sum(softmax_probs * torch.log(softmax_probs + 1e-8))
     else:
-        # Generalized entropy
         uncertainty = (1 / (1 - alpha)) * torch.log(torch.sum(softmax_probs ** alpha))
     return uncertainty.cpu().item()
 
 def calculate_doctor_beta(logits, beta=2.0):
-    """Calculate DOCTOR Beta uncertainty (based on Renyi entropy)"""
     softmax_probs = torch.softmax(logits, dim=-1)
     if beta == 1.0:
-        # Standard entropy
         uncertainty = -torch.sum(softmax_probs * torch.log(softmax_probs + 1e-8))
     else:
-        # Renyi entropy
         uncertainty = (1 / (1 - beta)) * torch.log(torch.sum(softmax_probs ** beta))
     return uncertainty.cpu().item()
 
 
 def reverse_fgsm_attack(image, epsilon, data_grad, min_vals, max_vals):
-    """Apply reverse FGSM attack with proper bounds"""
     sign_data_grad = data_grad.sign()
     perturbed_image = image - epsilon * sign_data_grad
-    # Use proper min/max values for normalized data
+    # use proper bounds 
     perturbed_image = torch.max(perturbed_image, min_vals)
     perturbed_image = torch.min(perturbed_image, max_vals)
     return perturbed_image
@@ -151,14 +136,13 @@ def initial_inference(model, dataloader, criterion, epsilon, device):
         image = images.to(device)
         label = labels.to(device)
 
-        # Get original prediction
+        # original pred 
         with torch.no_grad():
             outputs_original = model(image)
             _, predicted_original = torch.max(outputs_original.data, 1)
             original_labels.extend(labels.cpu().numpy())
             original_predictions.extend(predicted_original.cpu().numpy())
 
-        # Calculate gradients for perturbation
         image.requires_grad = True
         output_for_grad = model(image)
         loss = criterion(output_for_grad, label)
@@ -166,8 +150,6 @@ def initial_inference(model, dataloader, criterion, epsilon, device):
         model.zero_grad()
         loss.backward()
         data_grad = image.grad.data
-
-        # Calculate uncertainty metrics
         logits = output_for_grad.squeeze(0)
         probabilities = torch.softmax(logits, dim=-1)
 
@@ -180,7 +162,6 @@ def initial_inference(model, dataloader, criterion, epsilon, device):
         doctor_alpha_val = calculate_doctor_alpha(logits, alpha=2.0)
         doctor_beta_val = calculate_doctor_beta(logits, beta=2.0)
 
-        # Original code had inverted logic
         #max_logit_val < 5.0):
         if (ratio_confidence_val > 0.010 and margin_confidence < 0.9970 and doctor_alpha_val > 0.003): 
             #ratio_confidence_val > 0.3 or   
@@ -243,11 +224,10 @@ def main():
 
     criterion = nn.CrossEntropyLoss()
     epsilon = 0.03
-
-    # Process images and apply selective perturbation
+    #run the perturbation 
     refined_dataloader = initial_inference(model, testloader, criterion, epsilon, device)
     
-    # Run inference on the refined dataset
+    # inference on the updated dataset 
     print("running final please don't break here")
     final_accuracy, final_precision, final_recall, final_f1 = inference(model, refined_dataloader, device)
 
