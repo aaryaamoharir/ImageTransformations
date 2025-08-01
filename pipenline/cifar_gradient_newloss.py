@@ -9,6 +9,30 @@ from tqdm import tqdm
 # Constants for CIFAR-10 normalization
 CIFAR10_MEAN = (0.4914, 0.4822, 0.4465)
 CIFAR10_STD = (0.2023, 0.1994, 0.2010)
+def negative_class_loss(logits, predicted_labels, num_classes):
+    #randomly chosen class
+    # Create a tensor of all possible class indices
+    all_classes = torch.arange(num_classes).to(logits.device)
+
+    # Get the predicted class for each item in the batch
+    predicted_classes = predicted_labels.unsqueeze(1)
+
+    # Create a mask to filter out the predicted class
+    non_predicted_mask = all_classes.unsqueeze(0) != predicted_classes
+
+    # Select a random non-predicted class for each sample
+    # This requires a loop for the random choice per sample
+    batch_size = logits.size(0)
+    target_labels = torch.zeros(batch_size, dtype=torch.long).to(logits.device)
+    for i in range(batch_size):
+        non_predicted_indices = all_classes[all_classes != predicted_labels[i]]
+        target_labels[i] = non_predicted_indices[torch.randint(len(non_predicted_indices), (1,))]
+
+    return F.cross_entropy(logits, target_labels)
+
+#tried this but with second highest probability label 
+def pseudo_label_loss(logits, predicted_labels):
+    return F.cross_entropy(logits, predicted_labels)
 
 def logit_consistency_loss(logits_orig, logits_trans):
     """
@@ -125,8 +149,29 @@ def initial_inference(model, dataloader, epsilon, device):
                 
                 # Calculate consistency loss between the original logits and the current logits
                 # Detaching outputs_original ensures we only backpropagate through current_image
-                loss = logit_consistency_loss(outputs_original.detach(), output_for_grad)
-                
+                #loss = logit_consistency_loss(outputs_original.detach(), output_for_grad)
+                output_for_grad = model(current_image)
+
+                # Calculate consistency loss between the original logits and the current logits
+                # Detaching outputs_original ensures we only backpropagate through current_image
+                #loss = logit_consistency_loss(outputs_original.detach(), output_for_grad)
+                #probs = torch.softmax(output_for_grad, dim=1)
+                #loss = -torch.sum(probs * torch.log(probs + 1e-8)) / probs.shape[0]  # entropy loss
+                #loss = -torch.max(probs, dim=1).values.mean()  # maximize confidence
+                #logit = output_for_grad
+                #orig_pred = torch.argmax(probabilities, dim=-1)
+                #logit_orig = logit[:, orig_pred.item()]
+                #logit_alt = logit[:, 1 - orig_pred.item()]
+                #loss = (logit_orig - logit_alt).mean()
+
+                #top2 = torch.topk(probabilities, 2, dim=-1).indices
+                #target_class = top2[1].item()  # second-best guess
+                #logit_orig = logit[:, top2[0].item()]
+                #logit_alt = logit[:, target_class]
+                #loss = (logit_orig - logit_alt).mean()
+                loss = negative_class_loss(output_for_grad, predicted_original, 10)
+
+
                 model.zero_grad()
                 loss.backward()
                 data_grad = current_image.grad.data
