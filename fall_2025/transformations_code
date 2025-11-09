@@ -1,0 +1,306 @@
+import os 
+from PIL import Image, ImageEnhance, ImageFilter
+import pandas as pd
+import math
+import numpy as np
+import matplotlib.pyplot as plt
+import cv2
+import random
+from typing import List, Tuple, Union
+from scipy import ndimage
+from scipy.ndimage import binary_dilation
+import torch
+import torchvision
+import torchvision.transforms as transforms
+
+output_dir = "/Users/aaryaamoharir/Desktop/Summer 2025 /Research /corruptionML/CIFAR-10-C/transformed"
+store_dir = "/Users/aaryaamoharir/Desktop/Summer 2025 /Research /corruptionML/CIFAR-10-C/store"
+os.makedirs(output_dir, exist_ok=True)
+os.makedirs(store_dir, exist_ok=True)
+
+def load_cifar10_dataset(root_dir='./data', download=True):
+    """Load CIFAR-10 test dataset from torchvision"""
+    # Load the test set
+    testset_all = torchvision.datasets.CIFAR10(
+        root=root_dir, 
+        train=False, 
+        download=download
+    )
+    
+    images = []
+    for idx in range(len(testset_all)):
+        img, label = testset_all[idx]
+        # img is already a PIL Image
+        images.append((img, f"cifar10_test_{idx}_label_{label}"))
+    
+    print(f"Loaded {len(images)} images from CIFAR-10 test set.")
+    return images
+
+def vert_flip(img):
+    """Vertical flip transformation"""
+    return img.transpose(Image.FLIP_LEFT_RIGHT)
+
+def rand_crop(img):
+    """Random crop with 0.78 scale factor"""
+    w, h = img.size
+    cs = int(0.78 * w)
+    x, y = np.random.randint(0, w - cs + 1), np.random.randint(0, h - cs + 1)
+    return img.crop((x, y, x + cs, y + cs)).resize((32, 32))
+
+def apply_random_zoom(img, scale_factor):
+    """Apply zoom transformation (1.0 to 1.1 range)"""
+    return apply_scale(img, scale_factor)
+
+def apply_perspective_warp(img, distortion_scale=0.2):
+    """Apply symmetric perspective warp"""
+    # Convert PIL to tensor for torchvision transform
+    to_tensor = transforms.ToTensor()
+    to_pil = transforms.ToPILImage()
+    
+    img_tensor = to_tensor(img)
+    perspective_transform = transforms.RandomPerspective(
+        distortion_scale=distortion_scale, 
+        p=1.0  # Always apply
+    )
+    warped_tensor = perspective_transform(img_tensor)
+    return to_pil(warped_tensor)
+
+def apply_all_transformations(images):
+    
+    # 2d transformations with their bounds 
+    transformations_2d = {
+        'scale': {'min': 0.9, 'max': 1.4, 'step': 0.1},
+        'rotation': {'min': -22.5, 'max': 22.5, 'step': 2.5},
+        'lighten_darken': {'min': -0.05, 'max': 0.05, 'step': 0.01},
+        'gaussian_noise': {'min': 0.0, 'max': 0.1, 'step': 0.01},
+        'translation': {'min': -50, 'max': 50, 'step': 5},  # pixels
+        'contrast': {'min': 0, 'max': 1, 'step': 0.1}, 
+        'blur': {'min': 0, 'max': 5, 'step': 0.5},  
+        'shear': {'min': 0, 'max': 1, 'step': 0.1},
+        'vert_flip': {'apply': True},  # New: vertical flip
+        'rand_crop': {'apply': True},  # New: random crop
+        'zoom': {'min': 1.0, 'max': 1.1, 'step': 0.01},  # New: zoom 1.0-1.1
+        'perspective_warp': {'min': 0.0, 'max': 0.2, 'step': 0.05}  # New: perspective warp ±0.2
+    }
+    
+    transformations = {**transformations_2d}
+    
+    transformed_images = []
+    total_transforms = 0
+    
+    for i, (img, name) in enumerate(images):
+        ext = '.jpg'
+        
+        # apply each transformation to each image (amount of transformation is random)
+        for transform_type in transformations.keys():
+            params = transformations[transform_type]
+            
+            # Handle different transformation types
+            if transform_type == 'vert_flip':
+                new_filename = f"{name}_{transform_type}_corrupted{ext}"
+                transform_value = None
+            elif transform_type == 'rand_crop':
+                new_filename = f"{name}_{transform_type}_corrupted{ext}"
+                transform_value = None
+            elif transform_type == 'translation':
+                # For translation transforms, we need x and y values
+                num_steps = int((params['max'] - params['min']) / params['step']) + 1
+                possible_values = [params['min'] + j * params['step'] for j in range(num_steps)]
+                tx = random.choice(possible_values)
+                ty = random.choice(possible_values)
+                new_filename = f"{name}_{transform_type}_{tx}_{ty}_corrupted{ext}"
+            else:
+                # create discrete values 
+                num_steps = int((params['max'] - params['min']) / params['step']) + 1
+                possible_values = [params['min'] + j * params['step'] for j in range(num_steps)]
+                transform_value = random.choice(possible_values)
+                new_filename = f"{name}_{transform_type}_{transform_value}_corrupted{ext}"
+            
+            # apply transformation 
+            if transform_type == 'scale':
+                transformed_img = apply_scale(img, transform_value)
+            elif transform_type == 'rotation':
+                transformed_img = apply_rotation(img, transform_value)
+            elif transform_type == 'lighten_darken':
+                transformed_img = apply_brightness(img, transform_value)
+            elif transform_type == 'gaussian_noise':
+                transformed_img = apply_gaussian_noise(img, transform_value)
+            elif transform_type == 'translation':
+                transformed_img = apply_translation(img, tx, ty)
+            elif transform_type == 'contrast':
+                transformed_img = apply_contrast(img, transform_value)
+            elif transform_type == 'shear':
+                transformed_img = apply_shear(img, transform_value)
+            elif transform_type == 'blur':
+                transformed_img = apply_blur(img, transform_value)
+            elif transform_type == 'vert_flip':
+                transformed_img = vert_flip(img)
+            elif transform_type == 'rand_crop':
+                transformed_img = rand_crop(img)
+            elif transform_type == 'zoom':
+                transformed_img = apply_random_zoom(img, transform_value)
+            elif transform_type == 'perspective_warp':
+                transformed_img = apply_perspective_warp(img, transform_value)
+            
+            # Save the transformed image
+            save_path = os.path.join(output_dir, new_filename)
+            transformed_img.save(save_path)
+            transformed_images.append(transformed_img)
+            total_transforms += 1
+        
+        # progress each 1000 images to debug 
+        if (i + 1) % 1000 == 0:
+            print(f"Processed {i + 1}/{len(images)} original images, created {total_transforms} transformed images")
+    
+    return transformed_images
+
+#apply scaling to the images (zoom in and zoom out)
+def apply_scale(img: Image.Image, scale_factor: float) -> Image.Image:
+    width, height = img.size
+    new_width = int(width * scale_factor)
+    new_height = int(height * scale_factor)
+    
+    # resize the image 
+    scaled = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+    
+    # depending on if the image is scaled up or down, crop the images 
+    if scale_factor > 1.0:
+        left = (new_width - width) // 2
+        top = (new_height - height) // 2
+        right = left + width
+        bottom = top + height
+        scaled = scaled.crop((left, top, right, bottom))
+    elif scale_factor < 1.0:
+        # if the image is scaled down, we need to pad it to the original size
+        result = Image.new('RGB', (width, height), (0, 0, 0))
+        paste_x = (width - new_width) // 2
+        paste_y = (height - new_height) // 2
+        result.paste(scaled, (paste_x, paste_y))
+        scaled = result
+    
+    return scaled
+
+def apply_rotation(img: Image.Image, angle: float) -> Image.Image:
+    #using the ImageCV library to do rotations 
+    rotated = img.rotate(-angle, fillcolor=(0, 0, 0), expand=False)
+    return rotated
+
+def apply_contrast(img: Image.Image, contrast_amount: float) -> Image.Image:
+    img_np = np.array(img)
+    if img_np.shape[2] == 4: # Check if it's RGBA
+        img_np = cv2.cvtColor(img_np, cv2.COLOR_RGBA2RGB)
+    adjusted_image = cv2.convertScaleAbs(img_np, alpha=contrast_amount, beta=0)
+    #convert back to PIL Image
+    adjusted_image_pil = Image.fromarray(adjusted_image)
+    return adjusted_image_pil
+
+def apply_shear(img: Image.Image, shear_factor: float) -> Image.Image:
+    width, height = img.size
+    #new width and height after shear
+    shift_in_pixels = int(math.ceil(shear_factor * height))
+    new_width = width + shift_in_pixels
+    shear_image = img.transform(
+        (new_width, height),  #new image size 
+        Image.AFFINE,         # affine transformation since shear is a linear transformation
+        (1, shear_factor, -shift_in_pixels if shear_factor > 0 else 0,  #this is the transformation matrix
+         0, 1, 0),
+        resample=Image.BICUBIC,
+        fillcolor=(255, 255, 255)  # or any background color you prefer
+    )
+
+    return shear_image
+
+def apply_blur(img: Image.Image, blur_radius: float) -> Image.Image:
+    img_np = np.array(img)
+
+    #convert to bgr array if needed (apparently most PIL images are RGB)
+    if img_np.ndim == 3 and img_np.shape[2] == 3: # RGB
+        img_np_bgr = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
+    elif img_np.ndim == 3 and img_np.shape[2] == 4: # RGBA 
+        img_np_bgr = cv2.cvtColor(img_np, cv2.COLOR_RGBA2BGR)
+    else: 
+        img_np_bgr = img_np.copy()
+
+    ksize = int(blur_radius * 6)
+    if ksize % 2 == 0:
+        ksize += 1
+    # minimum kernal size 
+    if ksize < 3 and blur_radius > 0:
+        ksize = 3
+    elif blur_radius == 0: #no blur 
+        return img 
+    
+    # apply gaussian blur
+    blurred_image_np_bgr = cv2.GaussianBlur(img_np_bgr, (ksize, ksize), blur_radius)
+
+    if img_np.ndim == 3 and (img_np.shape[2] == 3 or img_np.shape[2] == 4):
+        blurred_image_np_rgb = cv2.cvtColor(blurred_image_np_bgr, cv2.COLOR_BGR2RGB)
+    else: 
+        blurred_image_np_rgb = blurred_image_np_bgr
+    blurred_image_pil = Image.fromarray(blurred_image_np_rgb)
+
+    return blurred_image_pil
+    
+
+#brighten or darken the image 
+def apply_brightness(img: Image.Image, brightness_factor: float) -> Image.Image:
+    # brightness_factor ranges from -0.05 to 0.05
+    # brightness enhancer: factor < 1.0 darkens, factor > 1.0 lightens
+    enhancement_factor = 1.0 + brightness_factor
+    
+    enhancer = ImageEnhance.Brightness(img)
+    adjusted = enhancer.enhance(enhancement_factor)
+    
+    return adjusted
+
+#apply gaussian noise to the image
+def apply_gaussian_noise(img: Image.Image, noise_std: float) -> Image.Image:
+    img_array = np.array(img)
+    noise = np.random.normal(0, noise_std * 255, img_array.shape).astype(np.float32)
+    noisy = img_array.astype(np.float32) + noise
+    
+    # convert the image back to uint8 and clip values to valid range
+    noisy = np.clip(noisy, 0, 255).astype(np.uint8)
+    
+    # convert back to PIL Image
+    return Image.fromarray(noisy)
+
+#apply translation to the image by tx and ty pixels
+def apply_translation(img: Image.Image, tx: float, ty: float) -> Image.Image:
+    width, height = img.size
+    
+    result = Image.new('RGB', (width, height), (0, 0, 0))
+    paste_x = int(tx)
+    paste_y = int(ty)
+    
+    # handle negative translations 
+    crop_left = max(0, -paste_x)
+    crop_top = max(0, -paste_y)
+    crop_right = min(width, width - paste_x)
+    crop_bottom = min(height, height - paste_y)
+    
+    # crop the image if the translation would result in an empty area
+    if crop_left < crop_right and crop_top < crop_bottom:
+        cropped = img.crop((crop_left, crop_top, crop_right, crop_bottom))
+
+        # calculate where to paste the cropped image in the result
+        result_paste_x = max(0, paste_x)
+        result_paste_y = max(0, paste_y)
+        
+        result.paste(cropped, (result_paste_x, result_paste_y))
+    
+    return result
+
+if __name__ == "__main__":
+    # Load CIFAR-10 dataset
+    images = load_cifar10_dataset(root_dir='./data', download=True)
+    images = [images[0]] 
+    
+    # Uncomment to test with subset
+    # images = images[:4]  # limit to first 4 images to test
+    
+    print(f"Loaded {len(images)} images.")
+    print(f"Will create {len(images) * 12} transformed images (12 transformations per original image)")
+    
+    transformed_images = apply_all_transformations(images)
+    print(f"Successfully transformed and saved {len(transformed_images)} images.")
